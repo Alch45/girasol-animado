@@ -273,7 +273,7 @@
   const GOLDEN = Math.PI*(3-Math.sqrt(5)); // 137.5°
 
   // Disco floral: filotaxis de Fibonacci
-  const SEED_N = LOW ? 320 : 520;
+  const SEED_N = LOW ? 260 : 520;
   const seeds = [];
   for(let n=0;n<SEED_N;n++){
     seeds.push({ n, a:n*GOLDEN, r01:Math.sqrt(n/SEED_N), ph:rand(0,Math.PI*2) });
@@ -581,7 +581,14 @@
 
   /* ---------- Loop principal ---------- */
   let tNow=0;
+  // En modo ligero (móvil) limitamos a ~30 fps: la mitad de trabajo,
+  // casi imperceptible en una animación tan suave.
+  const FRAME_MS = LOW ? 1000/30 : 0;
+  let lastFrame = -1e9;
   function render(t){
+    requestAnimationFrame(render);
+    if(FRAME_MS && t - lastFrame < FRAME_MS) return;
+    lastFrame = t;
     tNow=t;
     ctx.clearRect(0,0,W,H);
 
@@ -605,8 +612,6 @@
     ctx.restore();
 
     drawPollen();
-
-    requestAnimationFrame(render);
   }
 
   /* ---------- Interacción ---------- */
