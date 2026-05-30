@@ -184,6 +184,10 @@
     .divider{ background:linear-gradient(90deg, rgba(255,210,63,0.85), rgba(255,210,63,0.1) 70%, transparent); }
   }
 
+  /* Modo ligero (móviles/equipos modestos): el grano con mix-blend-mode
+     fuerza recomponer toda la pantalla cada fotograma; se desactiva. */
+  body.lite::after{ display:none; }
+
   @media (prefers-reduced-motion:reduce){
     .word{ animation:none; }
   }
@@ -209,6 +213,13 @@
   "use strict";
 
   const REDUCED = window.matchMedia('(prefers-reduced-motion:reduce)').matches;
+
+  /* Modo ligero: móviles, pantallas pequeñas o equipos de pocos núcleos.
+     Reduce densidad, partículas, resolución y sombras para ir fluido. */
+  const LOW = REDUCED
+    || /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)
+    || (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4)
+    || Math.min(window.innerWidth, window.innerHeight) < 760;
 
   /* ---------- RNG determinista (mulberry32) ---------- */
   function mulberry32(a){
@@ -247,7 +258,7 @@
 
   function resize(){
     const r = stage.getBoundingClientRect();
-    DPR = Math.min(window.devicePixelRatio||1, 2);
+    DPR = Math.min(window.devicePixelRatio||1, LOW ? 1.5 : 2);
     W = r.width; H = r.height;
     cv.width = Math.round(W*DPR);
     cv.height = Math.round(H*DPR);
@@ -262,7 +273,7 @@
   const GOLDEN = Math.PI*(3-Math.sqrt(5)); // 137.5°
 
   // Disco floral: filotaxis de Fibonacci
-  const SEED_N = 520;
+  const SEED_N = LOW ? 320 : 520;
   const seeds = [];
   for(let n=0;n<SEED_N;n++){
     seeds.push({ n, a:n*GOLDEN, r01:Math.sqrt(n/SEED_N), ph:rand(0,Math.PI*2) });
@@ -295,6 +306,48 @@
   // desfase de media posición para la capa frontal
   petalsFront.forEach(p => p.angle += (Math.PI/petalsFront.length));
 
+  /* ---------- Sprites cacheados (rendimiento) ----------
+     Los degradados radiales son caros de crear. En lugar de generar
+     uno por semilla/partícula en cada fotograma, los pre-renderizamos
+     una sola vez a pequeños canvas y luego solo los dibujamos. */
+  function seedColor(r01){
+    return r01 < 0.5
+      ? lerpC('#241405','#7a4a10', r01/0.5)
+      : lerpC('#7a4a10','#cf8a1e', (r01-0.5)/0.5);
+  }
+  const SEED_BUCKETS = 28;
+  const SEED_SPR = 64;
+  const seedSprites = [];
+  for(let b=0;b<SEED_BUCKETS;b++){
+    const col = seedColor((b+0.5)/SEED_BUCKETS);
+    const c = document.createElement('canvas');
+    c.width = c.height = SEED_SPR;
+    const sx = c.getContext('2d');
+    const m = SEED_SPR/2;
+    const sg = sx.createRadialGradient(m-m*0.3, m-m*0.3, m*0.1, m, m, m);
+    sg.addColorStop(0, lerpC(col,'#ffd98a',0.5));
+    sg.addColorStop(0.6, col);
+    sg.addColorStop(1, lerpC(col,'#160c02',0.5));
+    sx.fillStyle = sg;
+    sx.beginPath(); sx.arc(m,m,m,0,Math.PI*2); sx.fill();
+    seedSprites.push(c);
+  }
+
+  const POLLEN_SPR = 48;
+  const pollenSprite = (() => {
+    const c = document.createElement('canvas');
+    c.width = c.height = POLLEN_SPR;
+    const sx = c.getContext('2d');
+    const m = POLLEN_SPR/2;
+    const gr = sx.createRadialGradient(m,m,0,m,m,m);
+    gr.addColorStop(0,'rgba(255,232,160,1)');
+    gr.addColorStop(0.4,'rgba(255,210,63,0.7)');
+    gr.addColorStop(1,'rgba(255,180,40,0)');
+    sx.fillStyle = gr;
+    sx.beginPath(); sx.arc(m,m,m,0,Math.PI*2); sx.fill();
+    return c;
+  })();
+
   /* ---------- Estado animable (mutado por GSAP) ---------- */
   const S = { bloom:0, disc:0, hover:0, leanX:0, leanY:0, glow:0 };
 
@@ -302,7 +355,7 @@
   const pointer = { x:0, y:0, px:0, py:0, inside:false };
   const pollen = [];
   const motes = [];
-  const MOTE_N = REDUCED ? 8 : 22;
+  const MOTE_N = LOW ? 8 : 22;
   for(let i=0;i<MOTE_N;i++){
     motes.push({ x:rand(0,1), y:rand(0,1), vy:rand(0.00006,0.00022), r:rand(0.6,2.2), a:rand(0.05,0.22), drift:rand(0,Math.PI*2) });
   }
@@ -322,7 +375,8 @@
         col: rng()<0.5 ? '#FFD23F' : '#FFE9A8'
       });
     }
-    if(pollen.length>260) pollen.splice(0, pollen.length-260);
+    const MAX_POLLEN = LOW ? 130 : 260;
+    if(pollen.length>MAX_POLLEN) pollen.splice(0, pollen.length-MAX_POLLEN);
   }
 
   /* ---------- Trazado de un pétalo (punta bífida tipo girasol) ---------- */
@@ -358,9 +412,11 @@
       g.addColorStop(1, p.tipLight);
       ctx.fillStyle = g;
 
-      ctx.shadowColor = 'rgba(50,24,0,0.32)';
-      ctx.shadowBlur  = base*0.022;
-      ctx.shadowOffsetY = base*0.006;
+      if(!LOW){
+        ctx.shadowColor = 'rgba(50,24,0,0.32)';
+        ctx.shadowBlur  = base*0.015;
+        ctx.shadowOffsetY = base*0.006;
+      }
       petalPath(L, Wd);
       ctx.fill();
 
@@ -408,22 +464,11 @@
 
       const sz = base*0.0088*(0.55+0.7*s.r01)*breath*(1+0.05*Math.sin(tNow*0.0026+s.ph));
 
-      // color del centro al borde
-      let col;
-      if(s.r01 < 0.5)      col = lerpC('#241405','#7a4a10', s.r01/0.5);
-      else                 col = lerpC('#7a4a10','#cf8a1e', (s.r01-0.5)/0.5);
-
       ctx.globalAlpha = fade;
 
-      // textura: punto con halo claro
-      const sg = ctx.createRadialGradient(x-sz*0.3, y-sz*0.3, sz*0.1, x, y, sz);
-      sg.addColorStop(0, lerpC(col,'#ffd98a',0.5));
-      sg.addColorStop(0.6, col);
-      sg.addColorStop(1, lerpC(col,'#160c02',0.5));
-      ctx.fillStyle = sg;
-      ctx.beginPath();
-      ctx.arc(x,y,sz,0,Math.PI*2);
-      ctx.fill();
+      // textura: punto con halo claro (sprite cacheado por color)
+      const bucket = Math.min(SEED_BUCKETS-1, (s.r01*SEED_BUCKETS)|0);
+      ctx.drawImage(seedSprites[bucket], x-sz, y-sz, sz*2, sz*2);
 
       // corona de florones inmaduros (borde brillante)
       if(s.r01 > 0.9){
@@ -516,16 +561,11 @@
       p.x+=Math.sin(tNow*0.003+i)*0.18; // deriva
       p.life-=p.decay;
       if(p.life<=0){ pollen.splice(i,1); continue; }
-      const a=p.life;
-      const gr=ctx.createRadialGradient(p.x,p.y,0,p.x,p.y,p.r*3);
-      gr.addColorStop(0,`rgba(255,232,160,${a})`);
-      gr.addColorStop(0.4,`rgba(255,210,63,${a*0.7})`);
-      gr.addColorStop(1,'rgba(255,180,40,0)');
-      ctx.fillStyle=gr;
-      ctx.beginPath();
-      ctx.arc(p.x,p.y,p.r*3,0,Math.PI*2);
-      ctx.fill();
+      const rr=p.r*3;
+      ctx.globalAlpha=p.life;
+      ctx.drawImage(pollenSprite, p.x-rr, p.y-rr, rr*2, rr*2);
     }
+    ctx.globalAlpha=1;
     // motas ambientales
     for(const m of motes){
       m.y-=m.vy; m.x+=Math.sin(tNow*0.0006+m.drift)*0.0004;
@@ -594,7 +634,7 @@
   function onDown(e){
     const r=stage.getBoundingClientRect();
     pointer.x=e.clientX-r.left; pointer.y=e.clientY-r.top;
-    spawnPollen(34, 1.8); // explosión de polen
+    spawnPollen(LOW ? 20 : 34, 1.8); // explosión de polen
     gsap.fromTo(S,{hover:S.hover},{hover:1, duration:0.25, yoyo:true, repeat:1, ease:'power2.out', overwrite:'auto'});
   }
 
@@ -637,6 +677,7 @@
   }
 
   /* ---------- Init ---------- */
+  if(LOW) document.body.classList.add('lite');
   resize();
   window.addEventListener('resize', resize);
   requestAnimationFrame(render);
