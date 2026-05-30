@@ -214,12 +214,12 @@
 
   const REDUCED = window.matchMedia('(prefers-reduced-motion:reduce)').matches;
 
-  /* Modo ligero: móviles, pantallas pequeñas o equipos de pocos núcleos.
-     Reduce densidad, partículas, resolución y sombras para ir fluido. */
+  /* Modo ligero: dispositivos táctiles (móviles/tablets) o reduce-motion.
+     Usamos puntero grueso (pointer:coarse) en vez del tamaño de ventana,
+     así una laptop con ventana baja NO se degrada. */
   const LOW = REDUCED
     || /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)
-    || (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4)
-    || Math.min(window.innerWidth, window.innerHeight) < 760;
+    || window.matchMedia('(hover:none) and (pointer:coarse)').matches;
 
   /* ---------- RNG determinista (mulberry32) ---------- */
   function mulberry32(a){
@@ -637,7 +637,9 @@
     ctx.translate(cx + S.leanX*base*0.02, cy + S.leanY*base*0.015);
 
     if(florBaked){
-      ctx.drawImage(florCanvas, cx - florHalf, cy - florHalf, florSize, florSize);
+      // el origen ya está en el centro de la flor (cx,cy) por las
+      // traslaciones de arriba: centrar la imagen es solo -florHalf
+      ctx.drawImage(florCanvas, -florHalf, -florHalf, florSize, florSize);
     } else {
       drawPetalLayer(petalsBack,  discR*0.9,  base*0.205, base*0.085, petalsBack.length);
       drawPetalLayer(petalsFront, discR*0.82, base*0.165, base*0.072, petalsFront.length);
