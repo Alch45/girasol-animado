@@ -252,9 +252,13 @@
 
   /* ---------- Canvas setup ---------- */
   const cv = document.getElementById('flor');
-  const ctx = cv.getContext('2d');
+  let ctx = cv.getContext('2d');           // 'let' para poder hornear (modo ligero)
   const stage = document.getElementById('stage');
   let W=0,H=0,DPR=1,cx=0,cy=0,base=0,discR=0;
+
+  // Flor "horneada" a una imagen (modo ligero): dibujarla cuesta 1 operación
+  // por fotograma en vez de redibujar ~300 pétalos y semillas.
+  let florCanvas=null, florBaked=false, florSize=0, florHalf=0;
 
   function resize(){
     const r = stage.getBoundingClientRect();
@@ -267,6 +271,7 @@
     cy = H*0.45;
     base = Math.min(W, H*1.05);
     discR = base*0.158;
+    florBaked = false;  // el tamaño cambió: re-hornear
   }
 
   /* ---------- Geometría del girasol ---------- */
@@ -375,7 +380,7 @@
         col: rng()<0.5 ? '#FFD23F' : '#FFE9A8'
       });
     }
-    const MAX_POLLEN = LOW ? 130 : 260;
+    const MAX_POLLEN = LOW ? 55 : 260;
     if(pollen.length>MAX_POLLEN) pollen.splice(0, pollen.length-MAX_POLLEN);
   }
 
@@ -579,6 +584,29 @@
     ctx.restore();
   }
 
+  /* ---------- Hornear la flor (modo ligero) ----------
+     Dibuja pétalos + disco UNA vez a un canvas aparte. Luego el loop
+     solo lo estampa con drawImage (1 op) en vez de redibujar todo. */
+  function bakeFlor(){
+    florSize = Math.ceil(base*1.7);
+    florHalf = florSize/2;
+    florCanvas = document.createElement('canvas');
+    florCanvas.width = florCanvas.height = Math.ceil(florSize*DPR);
+    const bctx = florCanvas.getContext('2d');
+    bctx.setTransform(DPR,0,0,DPR,0,0);
+
+    const prevCtx = ctx, prevHover = S.hover;
+    ctx = bctx; S.hover = 0;            // pose neutra, centrada
+    ctx.save();
+    ctx.translate(florHalf, florHalf);
+    drawPetalLayer(petalsBack,  discR*0.9,  base*0.205, base*0.085, petalsBack.length);
+    drawPetalLayer(petalsFront, discR*0.82, base*0.165, base*0.072, petalsFront.length);
+    drawDisc();
+    ctx.restore();
+    ctx = prevCtx; S.hover = prevHover;
+    florBaked = true;
+  }
+
   /* ---------- Loop principal ---------- */
   let tNow=0;
   // En modo ligero (móvil) limitamos a ~30 fps: la mitad de trabajo,
@@ -591,6 +619,9 @@
     lastFrame = t;
     tNow=t;
     ctx.clearRect(0,0,W,H);
+
+    // En modo ligero, hornear la flor cuando termine de florecer
+    if(LOW && !florBaked && S.bloom>=0.999 && S.disc>=0.999) bakeFlor();
 
     drawGlow();
     drawStem();
@@ -605,9 +636,13 @@
     ctx.translate(-cx, -cy);
     ctx.translate(cx + S.leanX*base*0.02, cy + S.leanY*base*0.015);
 
-    drawPetalLayer(petalsBack,  discR*0.9,  base*0.205, base*0.085, petalsBack.length);
-    drawPetalLayer(petalsFront, discR*0.82, base*0.165, base*0.072, petalsFront.length);
-    drawDisc();
+    if(florBaked){
+      ctx.drawImage(florCanvas, cx - florHalf, cy - florHalf, florSize, florSize);
+    } else {
+      drawPetalLayer(petalsBack,  discR*0.9,  base*0.205, base*0.085, petalsBack.length);
+      drawPetalLayer(petalsFront, discR*0.82, base*0.165, base*0.072, petalsFront.length);
+      drawDisc();
+    }
 
     ctx.restore();
 
@@ -628,8 +663,8 @@
     const d=Math.hypot(pointer.x-cx, pointer.y-cy);
     const speed=Math.hypot(pointer.x-pointer.px, pointer.y-pointer.py);
     const now=performance.now();
-    if(d < base*0.42 && speed>1.5 && now-lastEmit>26){
-      spawnPollen(2, 1); lastEmit=now;
+    if(d < base*0.42 && speed>1.5 && now-lastEmit>(LOW?70:26)){
+      spawnPollen(LOW?1:2, 1); lastEmit=now;
     }
   }
   function onLeave(){
@@ -639,7 +674,7 @@
   function onDown(e){
     const r=stage.getBoundingClientRect();
     pointer.x=e.clientX-r.left; pointer.y=e.clientY-r.top;
-    spawnPollen(LOW ? 20 : 34, 1.8); // explosión de polen
+    spawnPollen(LOW ? 12 : 34, 1.8); // explosión de polen
     gsap.fromTo(S,{hover:S.hover},{hover:1, duration:0.25, yoyo:true, repeat:1, ease:'power2.out', overwrite:'auto'});
   }
 
